@@ -102,16 +102,15 @@ template<class KeyT, class ValT> class Cache {
         auto n = epoll_wait(epoll_fd, events.data(), max_conn, -1);
         for (int i = 0; i < n; i++) {
           if (events[i].events & (EPOLLRDHUP | EPOLLHUP)) {
-                std::cerr << "Warning: epoll event error, closing connection !" << std::endl;
-                close(events[i].data.fd);
-          }
-
-          if (server_socket == events[i].data.fd) {
+              std::cout << "Warning: epoll event error, closing connection !" << std::endl;
+              close(events[i].data.fd);
+          } else if (server_socket == events[i].data.fd) {
             std::cout << "Accepting connections !" << std::endl;
             // Block until connected... maybe bad ?
-            //while(networking::Error::None == networking::accept_conn(server_socket, event, epoll_fd)) {}
-            networking::accept_conn(server_socket, event, epoll_fd);
-          } else {
+            if(networking::Error::None != networking::accept_conn(server_socket, event, epoll_fd)) {
+              close(events[i].data.fd);
+            }
+          } else if(events[i].events & EPOLLIN || events[i].events & EPOLLOUT) {
             networking::read_data(events[i].data.fd, arr_buff.data(), buf_len);
 
             /* Deserialization */
@@ -126,8 +125,8 @@ template<class KeyT, class ValT> class Cache {
               size_t key_size = std::stoi( std::string(std::begin(arr_buff) + 1, sep_one_pos) );
               size_t val_size  = std::stoi( std::string(sep_one_pos + 1, sep_second_pos) );
 
-              std::string key = std::string(sep_second_pos + 1, sep_one_pos + key_size);
-              std::string val = std::string(sep_second_pos + key_size, sep_second_pos + key_size + val_size);
+              std::string key = std::string(sep_second_pos + 1, sep_second_pos + key_size);
+              std::string val = std::string(sep_second_pos + key_size + 1, sep_second_pos + key_size + val_size + 1);
 
               cache[key] = val;
               // Insert this, it comes from a client
@@ -135,25 +134,66 @@ template<class KeyT, class ValT> class Cache {
                 send_buffer.push_back({key, val});
                 // Message the other instances with the results !
               }
-            }
-
-            // Get me the value for this key
-            if(mode == 'g') {
+              networking::write_data(events[i].data.fd, "a", 1);
+            } else if(mode == 'g' || mode == 'd') {
               // Get the key
               auto sep_one_pos = std::find(std::begin(arr_buff), std::begin(arr_buff) + 130, '|');
               size_t key_size = std::stoi( std::string(std::begin(arr_buff) + 1, sep_one_pos) );
               std::string key = std::string(sep_one_pos + 1, sep_one_pos + key_size);
 
+
               const auto possible_val = cache.find(key);
-              //event.events = event.events | EPOLLOUT; // Is this neede d!?
-              if(likely(possible_val == cache.end())) {
-                auto err = write(events[i].data.fd, "n", 1);
+              if(likely(possible_val != cache.end())) {
+                if(mode == 'g') {
+                  if(possible_val->second.size() < 1) {
+                    std::cout << "Error, empty value: " << possible_val->second.c_str() << std::endl;
+                    networking::write_data(events[i].data.fd, "n", 1);
+                  } else {
+                    networking::write_data(events[i].data.fd, possible_val->second.c_str(), possible_val->second.size());
+                  }
+                } else {
+                  cache.erase(possible_val);
+                  networking::write_data(events[i].data.fd, "d", 1);
+                }
               } else {
-                auto err = write(events[i].data.fd, possible_val->second.c_str(), possible_val->second.size());
+                networking::write_data(events[i].data.fd, "n", 1);
               }
-              //event.events = event.events | EPOLLIN;// Is this neede d!?
+            } else {
+              networking::write_data(events[i].data.fd, "w", 1);
             }
-            //write(client_socket, "ABA", 3);
+          } else if (events[i].events & EPOLLPRI){
+            std::cout << "EPOLLPRI" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLRDNORM){
+            std::cout << "EPOLLRDNORM" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLRDBAND){
+            std::cout << "EPOLLRDBAND" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLWRNORM){
+            std::cout << "EPOLLWRNORM" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLWRBAND){
+            std::cout << "EPOLLWRBAND" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLMSG){
+            std::cout << "EPOLLMSG" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLERR){
+            std::cout << "EPOLLERR" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLONESHOT){
+            std::cout << "EPOLLONESHOT" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLET){
+            std::cout << "EPOLLET" << std::endl;
+            close(events[i].data.fd);
+          } else if (events[i].events & EPOLLOUT){
+            std::cout << "EPOLLOUT" << std::endl;
+            close(events[i].data.fd);
+          } else {
+            std::cout << "GOT UNKONW THINGY !" << std::endl;
+            close(events[i].data.fd);
           }
         }
       }

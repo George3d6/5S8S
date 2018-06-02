@@ -158,4 +158,20 @@ namespace networking {
 
     return {Error::None, socket_fd};
   }
+
+  void write_data(int fd, const char * buf, size_t buf_len) {
+    auto i = 0;
+    while (i < 5) {
+      i++;
+      auto err = write(fd, buf, buf_len);
+      if (err == -1) {
+        std::cout << err << " " << errno << std::endl;
+      } else {
+        break;
+      }
+    }
+    if (i == 5) {
+      close(fd);
+    }
+  }
 }
