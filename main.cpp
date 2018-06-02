@@ -9,12 +9,9 @@
 #include <vector>
 #include <thread>
 #include <stdexcept>
-
-//boost
-#include <iostream>
-#include <boost/array.hpp>
-#include <boost/asio.hpp>
-using boost::asio::ip::tcp;
+#include <thread>
+#include <algorithm>
+#include <iterator>
 
 //Debug purposes, remove for final compilation
 #include <iostream>
@@ -25,7 +22,6 @@ using boost::asio::ip::tcp;
 #include <unistd.h>
 #include <fcntl.h>
 #include <iostream>
-#include <string>
 #include <cstring>
 #include <netdb.h>
 #include <array>
@@ -41,19 +37,6 @@ template<class KeyT, class ValT> class Cache {
     std::vector<std::pair<KeyT, ValT>> send_buffer;
 
   public:
-    inline void add(KeyT && key, ValT && val) {
-      cache[key] = val;
-      send_buffer.emplace_back({key, val});
-    }
-
-    inline auto * get(const KeyT & key) {
-      const auto possible_val = cache.find(key);
-      if(likely(possible_val != cache.end())) {
-        return possible_val;
-      }
-      return nullptr;
-    }
-
     auto run() {
       /* MAKE SERVER */
 
@@ -82,7 +65,7 @@ template<class KeyT, class ValT> class Cache {
       //Possible code duplication
       struct epoll_event event;
       event.data.fd = server_socket;
-      event.events = EPOLLIN | EPOLLET;
+      event.events = EPOLLOUT | EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
 
       if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_socket, &event) == -1)
       if (epoll_fd == -1)  {
@@ -93,7 +76,7 @@ template<class KeyT, class ValT> class Cache {
 
 
       /* MAKE CLIENT */
-
+      /*
       auto conn_result = networking::connect("127.0.0.1", 5282);
       if(conn_result.first != networking::Error::None) {
         throw std::runtime_error("can't connect !!");
@@ -104,54 +87,82 @@ template<class KeyT, class ValT> class Cache {
       if (epoll_fd == -1)  {
           throw std::runtime_error("epoll_ctl failed for a mystery reason, enjoy debugging this one !");
       }
-
+      */
       /* MAKE CLIENT */
 
       constexpr int max_conn = 4096;
       std::array<struct epoll_event, max_conn> events;
 
 
+      constexpr size_t buf_len = 68512;
+      std::array<char,buf_len> arr_buff;
+
       // Start the "server" loop
       while (true) {
         auto n = epoll_wait(epoll_fd, events.data(), max_conn, -1);
-        std::cout << n << std::endl;
         for (int i = 0; i < n; i++) {
-          if (events[i].events & EPOLLERR || events[i].events & EPOLLHUP || !(events[i].events & EPOLLIN)) {
-                std::cerr << "Warning: epoll event error, closing connection !\n";
+          if (events[i].events & (EPOLLRDHUP | EPOLLHUP)) {
+                std::cerr << "Warning: epoll event error, closing connection !" << std::endl;
                 close(events[i].data.fd);
-          } else if (server_socket == events[i].data.fd) {
+          }
+
+          if (server_socket == events[i].data.fd) {
             std::cout << "Accepting connections !" << std::endl;
             // Block until connected... maybe bad ?
             //while(networking::Error::None == networking::accept_conn(server_socket, event, epoll_fd)) {}
             networking::accept_conn(server_socket, event, epoll_fd);
           } else {
-            std::cout << "Reading data!" << std::endl;
-            auto fd = events[i].data.fd;
-            constexpr size_t buf_len = 512;
-            std::array<char,buf_len> arr_buf;
-            networking::read_data(fd, arr_buf.data(), buf_len);
-            std::cout << "Got character: " << arr_buf.data() << std::endl;
-            write(client_socket, "ABA", 3);
+            networking::read_data(events[i].data.fd, arr_buff.data(), buf_len);
+
+            /* Deserialization */
+            auto mode = arr_buff[0];
+
+            // Insert this, it comes from another 5S8S instance
+            if(mode == 'i' || mode == 's') {
+              // Get the key
+              auto sep_one_pos = std::find(std::begin(arr_buff), std::begin(arr_buff) + 130, '|');
+              auto sep_second_pos = std::find(sep_one_pos + 1, sep_one_pos + 130, '|');
+
+              size_t key_size = std::stoi( std::string(std::begin(arr_buff) + 1, sep_one_pos) );
+              size_t val_size  = std::stoi( std::string(sep_one_pos + 1, sep_second_pos) );
+
+              std::string key = std::string(sep_second_pos + 1, sep_one_pos + key_size);
+              std::string val = std::string(sep_second_pos + key_size, sep_second_pos + key_size + val_size);
+
+              cache[key] = val;
+              // Insert this, it comes from a client
+              if(mode == 's') {
+                send_buffer.push_back({key, val});
+                // Message the other instances with the results !
+              }
+            }
+
+            // Get me the value for this key
+            if(mode == 'g') {
+              // Get the key
+              auto sep_one_pos = std::find(std::begin(arr_buff), std::begin(arr_buff) + 130, '|');
+              size_t key_size = std::stoi( std::string(std::begin(arr_buff) + 1, sep_one_pos) );
+              std::string key = std::string(sep_one_pos + 1, sep_one_pos + key_size);
+
+              const auto possible_val = cache.find(key);
+              //event.events = event.events | EPOLLOUT; // Is this neede d!?
+              if(likely(possible_val == cache.end())) {
+                auto err = write(events[i].data.fd, "n", 1);
+              } else {
+                auto err = write(events[i].data.fd, possible_val->second.c_str(), possible_val->second.size());
+              }
+              //event.events = event.events | EPOLLIN;// Is this neede d!?
+            }
+            //write(client_socket, "ABA", 3);
           }
         }
       }
-    }
-
-    auto run2() {
-      boost::asio::io_service io_service;
-      tcp::acceptor acceptor(io_service, tcp::endpoint(tcp::v4(), 5282));
-      tcp::socket socket(io_service);
+      close(server_socket);
     }
 };
 
 
 int main() {
-  Cache<int64_t, std::string> cache_test{};
-  cache_test.run2();
-  /*
-  ska::bytell_hash_map<int64_t, std::string> cache{};
-  cache[12] = std::string{"test"};
-  std::cout << "\"" << (*(cache.find(12) ) ).second  << "\"" << std::endl;
-  return 0;
-  */
+  Cache<std::string, std::string> cache_test{};
+  cache_test.run();
 }

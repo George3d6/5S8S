@@ -15,8 +15,7 @@
 
 
 
-// Based on this example: https://gist.github.com/dtoma/417ce9c8f827c9945a9192900aff805b
-//Courtesy of: Damien (https://github.com/dtoma)
+// Based on this example: https://gist.github.com/dtoma/417ce9c8f827c9945a9192900aff805b ... well, kinda was based on it, heavily modified now
 namespace networking {
   enum class Error {
     None = 0
@@ -108,21 +107,13 @@ namespace networking {
         return Error::AcceptConn;
       }
 
-      std::string hbuf(NI_MAXHOST, '\0');
-      std::string sbuf(NI_MAXSERV, '\0');
-
-      if (getnameinfo(&in_addr, in_len, const_cast<char*>(hbuf.data()), hbuf.size(),
-        const_cast<char*>(sbuf.data()), sbuf.size(), NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
-          std::cout << "[I] Accepted connection on descriptor " << in_fd << "(host=" << hbuf << ", port=" << sbuf << ")" << "\n";
-      }
-
       const auto err = make_socket_nonblocking(in_fd);
       if (err != Error::None) {
         return err;
       }
 
       event.data.fd = in_fd;
-      event.events = EPOLLIN | EPOLLET;
+      event.events = EPOLLOUT | EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
 
       if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, in_fd, &event) == -1) {
           return Error::Epoll_ctl;
@@ -153,9 +144,9 @@ namespace networking {
   std::pair<Error, int> connect(const char * addr, uint32_t port) {
     struct sockaddr_in srv_addr;
 
-    auto socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    auto socket_fd = socket(AF_UNSPEC, SOCK_STREAM, 0);
 
-    srv_addr.sin_family = AF_INET;
+    srv_addr.sin_family = AF_UNSPEC;
     srv_addr.sin_addr.s_addr = inet_addr(addr);
     srv_addr.sin_port = htons(port);
 
