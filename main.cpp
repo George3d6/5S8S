@@ -135,7 +135,8 @@ template<class KeyT, class ValT> class Cache {
                 // Message the other instances with the results !
               }
               networking::write_data(events[i].data.fd, "a", 1);
-            } else if(mode == 'g' || mode == 'd') {
+            }
+            else if(mode == 'g' || mode == 'd') {
               // Get the key
               auto sep_one_pos = std::find(std::begin(arr_buff), std::begin(arr_buff) + 130, '|');
               size_t key_size = std::stoi( std::string(std::begin(arr_buff) + 1, sep_one_pos) );
@@ -158,7 +159,11 @@ template<class KeyT, class ValT> class Cache {
               } else {
                 networking::write_data(events[i].data.fd, "n", 1);
               }
-            } else {
+            }
+            else if(mode == 'a') {
+              //@TODO: Register another 5S8S instance
+            }
+            else {
               networking::write_data(events[i].data.fd, "w", 1);
             }
           } else if (events[i].events & EPOLLPRI){
