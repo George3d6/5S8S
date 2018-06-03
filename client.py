@@ -63,10 +63,10 @@ class fiveSeightS:
 
 async def test():
     client = fiveSeightS()
-    for x in range(1,50):
+    for x in range(1,2000):
         await client.add(x,[x,x/2,x/4,x*2])
     await asyncio.sleep(3)
-    for x in range(1,50):
+    for x in range(1,2000):
         value = await client.get(x)
         print(value)
         #conf = await client.rm(x)

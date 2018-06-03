@@ -101,17 +101,19 @@ template<class KeyT, class ValT> class Cache {
       while (true) {
         auto n = epoll_wait(epoll_fd, events.data(), max_conn, -1);
         for (int i = 0; i < n; i++) {
-          if (events[i].events & (EPOLLRDHUP | EPOLLHUP)) {
+          auto active_fd = events[i].data.fd;
+          auto flags = events[i].events;
+          if (flags & (EPOLLRDHUP | EPOLLHUP)) {
               std::cout << "Warning: epoll event error, closing connection !" << std::endl;
-              close(events[i].data.fd);
-          } else if (server_socket == events[i].data.fd) {
+              close(active_fd);
+          } else if (server_socket == active_fd) {
             std::cout << "Accepting connections !" << std::endl;
             // Block until connected... maybe bad ?
             if(networking::Error::None != networking::accept_conn(server_socket, event, epoll_fd)) {
-              close(events[i].data.fd);
+              close(active_fd);
             }
-          } else if(events[i].events & EPOLLIN || events[i].events & EPOLLOUT) {
-            networking::read_data(events[i].data.fd, arr_buff.data(), buf_len);
+          } else if(flags & EPOLLIN || flags & EPOLLOUT) {
+            networking::read_data(active_fd, arr_buff.data(), buf_len);
 
             /* Deserialization */
             auto mode = arr_buff[0];
@@ -134,7 +136,7 @@ template<class KeyT, class ValT> class Cache {
                 send_buffer.push_back({key, val});
                 // Message the other instances with the results !
               }
-              networking::write_data(events[i].data.fd, "a", 1);
+              networking::write_data(active_fd, "a", 1);
             }
             else if(mode == 'g' || mode == 'd') {
               // Get the key
@@ -148,57 +150,57 @@ template<class KeyT, class ValT> class Cache {
                 if(mode == 'g') {
                   if(possible_val->second.size() < 1) {
                     std::cout << "Error, empty value: " << possible_val->second.c_str() << std::endl;
-                    networking::write_data(events[i].data.fd, "n", 1);
+                    networking::write_data(active_fd, "n", 1);
                   } else {
-                    networking::write_data(events[i].data.fd, possible_val->second.c_str(), possible_val->second.size());
+                    networking::write_data(active_fd, possible_val->second.c_str(), possible_val->second.size());
                   }
                 } else {
                   cache.erase(possible_val);
-                  networking::write_data(events[i].data.fd, "d", 1);
+                  networking::write_data(active_fd, "d", 1);
                 }
               } else {
-                networking::write_data(events[i].data.fd, "n", 1);
+                networking::write_data(active_fd, "n", 1);
               }
             }
             else if(mode == 'a') {
-              //@TODO: Register another 5S8S instance
+              //@TODO: Register another 5S8S cache
             }
             else {
-              networking::write_data(events[i].data.fd, "w", 1);
+              networking::write_data(active_fd, "w", 1);
             }
-          } else if (events[i].events & EPOLLPRI){
+          } else if (flags & EPOLLPRI){
             std::cout << "EPOLLPRI" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLRDNORM){
+            close(active_fd);
+          } else if (flags & EPOLLRDNORM){
             std::cout << "EPOLLRDNORM" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLRDBAND){
+            close(active_fd);
+          } else if (flags & EPOLLRDBAND){
             std::cout << "EPOLLRDBAND" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLWRNORM){
+            close(active_fd);
+          } else if (flags & EPOLLWRNORM){
             std::cout << "EPOLLWRNORM" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLWRBAND){
+            close(active_fd);
+          } else if (flags & EPOLLWRBAND){
             std::cout << "EPOLLWRBAND" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLMSG){
+            close(active_fd);
+          } else if (flags & EPOLLMSG){
             std::cout << "EPOLLMSG" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLERR){
+            close(active_fd);
+          } else if (flags & EPOLLERR){
             std::cout << "EPOLLERR" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLONESHOT){
+            close(active_fd);
+          } else if (flags & EPOLLONESHOT){
             std::cout << "EPOLLONESHOT" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLET){
+            close(active_fd);
+          } else if (flags & EPOLLET){
             std::cout << "EPOLLET" << std::endl;
-            close(events[i].data.fd);
-          } else if (events[i].events & EPOLLOUT){
+            close(active_fd);
+          } else if (flags & EPOLLOUT){
             std::cout << "EPOLLOUT" << std::endl;
-            close(events[i].data.fd);
+            close(active_fd);
           } else {
             std::cout << "GOT UNKONW THINGY !" << std::endl;
-            close(events[i].data.fd);
+            close(active_fd);
           }
         }
       }
