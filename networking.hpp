@@ -164,8 +164,14 @@ namespace networking {
     while (i < 5) {
       i++;
       auto err = write(fd, buf, buf_len);
-      if (err == -1) {
-        std::cout << err << " " << errno << std::endl;
+      if (err != 0) {
+        if(errno == 9) {
+          close(fd);
+        } else if (errno != 11) {
+          std::cout << err << " " << errno << std::endl;
+          i = 0;
+          break;
+        }
       } else {
         break;
       }

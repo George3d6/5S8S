@@ -90,7 +90,7 @@ template<class KeyT, class ValT> class Cache {
       */
       /* MAKE CLIENT */
 
-      constexpr int max_conn = 4096;
+      constexpr int max_conn = 8192;
       std::array<struct epoll_event, max_conn> events;
 
 
