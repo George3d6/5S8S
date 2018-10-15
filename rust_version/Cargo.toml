@@ -1,0 +1,11 @@
+[package]
+name = "5s8s"
+version = "0.1.0"
+authors = ["George Hosu <george@cerebralab.com>"]
+
+[dependencies]
+tokio = "0.1.11"
+futures = ""
+
+[features]
+default = []
