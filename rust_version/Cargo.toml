@@ -6,6 +6,7 @@ authors = ["George Hosu <george@cerebralab.com>"]
 [dependencies]
 tokio = "0.1.11"
 futures = ""
+tokio-current-thread = "0.1.3"
 
 [features]
 default = []
