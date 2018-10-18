@@ -14,7 +14,7 @@ use std::cell::UnsafeCell;
 use std::rc::Rc;
 
 pub struct State {
-    string_cache: UnsafeCell<HashMap<String, String>>,
+    string_cache: UnsafeCell<HashMap<Vec<u8>, Vec<u8>>>,
     peers: UnsafeCell<Vec<String>>,
 }
 
@@ -22,7 +22,7 @@ impl State {
     fn get_peers(&self) -> &mut Vec<String> {
         unsafe { return &mut *self.peers.get();}
     }
-    fn get_string_cache(&self) -> &mut HashMap<String, String> {
+    fn get_string_cache(&self) -> &mut HashMap<Vec<u8>, Vec<u8>> {
         unsafe { return &mut *self.string_cache.get();}
     }
 }
@@ -71,22 +71,30 @@ fn main() {
             }
 
             (_reader, action, key_len, val_len)
-        }).map(move |(_reader, action, key_len, val_len)| {
+        })
+        .map_err(|e| eprintln!("Processing error: {:?}", e))
+        .map(move |(_reader, action, key_len, val_len)| {
             let buf = vec![0; key_len + val_len];
             read_exact(_reader, buf)
-        }); //.map_err(|e| eprintln!("Processing error: {:?}", e)).then(move |_| Ok(()));
-
-        let pp = processing.map(|(_, body)| {
+        })
+        .map_err(|e| eprintln!("Processing error: {:?}", e))
+        .map(|body| {
             println!("{:?}", body);
-            String::from("Success")
-        });
+            return String::from("Success")
+        })
+        .map_err(|e| eprintln!("Processing error: {:?}", e))
+        .map(|_response| {
+            println!("executing wrtie all");
+            write_all(writer, _response.into_bytes()).map(|(w, _)| w)
+        })
+        .map_err(|e| eprintln!("Processing error: {:?}", e))
+        .then(move |_| Ok(()));
 
-        let msg = pp.fold(writer, |_writer, _response| {
-            write_all(_writer, _response.into_bytes()).map(|(w, _)| w)
-        }).then(move |_| Ok(()));
-
-        tokio_current_thread::spawn(msg);
+        tokio_current_thread::spawn(processing);
         Ok(())
+
+        //.map_err(|e| eprintln!("Processing error: {:?}", e)).then(move |_| Ok(()));
+
 
         /*
         let lines = lines(BufReader::new(reader));
