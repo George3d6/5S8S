@@ -2,10 +2,11 @@ extern crate tokio;
 extern crate tokio_current_thread;
 
 use tokio::prelude::*;
-use tokio::io::{lines, write_all};
+use tokio::io::{write_all, read_until, read_exact};
 use tokio::net::{TcpListener, TcpStream};
 
 use std::collections::HashMap;
+use std::str;
 use std::vec::Vec;
 use std::string::String;
 use std::io::BufReader;
@@ -51,11 +52,43 @@ fn main() {
     let listener = TcpListener::bind(&addr).expect("unable to bind TCP listener");
 
     let server = listener.incoming()
-    .map_err(|e| eprintln!("accept failed = {:?}", e))
+    .map_err(|e| eprintln!("Accept connection error: {:?}", e))
     .for_each(move |sock| {
         let state = state_global.clone();
 
         let (reader, writer) = sock.split();
+
+        // let metadata: Vec<u8> = Vec::new();
+        let metadata_future = read_until(BufReader::new(reader), '#' as u8, Vec::new());
+        let processing = metadata_future.map(move |(_reader, metadata)| {
+            let action = metadata[0];
+            let key_len = str::from_utf8(&metadata[1..5]).unwrap().parse::<usize>().unwrap();
+            let mut val_len = 0;
+
+            // Replicated Add (from another 5S8S in order to replicate)
+            if action == 'a' as u8 || action == 'r' as u8 {
+                val_len = str::from_utf8(&metadata[5..13]).unwrap().parse::<usize>().unwrap();
+            }
+
+            (_reader, action, key_len, val_len)
+        }).map(move |(_reader, action, key_len, val_len)| {
+            let buf = vec![0; key_len + val_len];
+            read_exact(_reader, buf)
+        }); //.map_err(|e| eprintln!("Processing error: {:?}", e)).then(move |_| Ok(()));
+
+        let pp = processing.map(|(_, body)| {
+            println!("{:?}", body);
+            String::from("Success")
+        });
+
+        let msg = pp.fold(writer, |_writer, _response| {
+            write_all(_writer, _response.into_bytes()).map(|(w, _)| w)
+        }).then(move |_| Ok(()));
+
+        tokio_current_thread::spawn(msg);
+        Ok(())
+
+        /*
         let lines = lines(BufReader::new(reader));
 
         let responses = lines.map(move |line: String| {
@@ -96,6 +129,7 @@ fn main() {
         let msg = writes.then(move |_| Ok(()));
         tokio_current_thread::spawn(msg);
         Ok(())
+    */
     });
 
     tokio_current_thread::block_on_all(server);
