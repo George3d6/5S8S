@@ -47,7 +47,7 @@ public:
       boost::system::error_code error;
 
       size_t len = socket.read_some(boost::asio::buffer(buf), error);
-      std::cout << std::string(buf, len) << "!!" << std::endl;
+      std::cout << "!!" << std::endl;
 
       boost::system::error_code ignored_error;
       boost::asio::write(socket, boost::asio::buffer("message"), ignored_error);

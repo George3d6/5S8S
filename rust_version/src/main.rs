@@ -5,6 +5,7 @@ use tokio::prelude::*;
 use tokio::io::{write_all, read_until, read_exact};
 use tokio::net::{TcpListener, TcpStream};
 
+
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
@@ -12,6 +13,7 @@ use std::string::String;
 use std::io::BufReader;
 use std::cell::UnsafeCell;
 use std::rc::Rc;
+
 
 pub struct State {
     string_cache: UnsafeCell<HashMap<Vec<u8>, Vec<u8>>>,
@@ -88,7 +90,7 @@ fn main() {
             write_all(writer, _response.into_bytes()).map(|(w, _)| w)
         })
         .map_err(|e| eprintln!("Processing error: {:?}", e))
-        .then(move |_| Ok(()));
+        .then(move |_| Ok( () ));
 
         tokio_current_thread::spawn(processing);
         Ok(())
