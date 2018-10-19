@@ -1,9 +1,15 @@
 extern crate tokio;
 extern crate tokio_current_thread;
+#[macro_use]
+extern crate futures;
+extern crate bytes;
 
-use tokio::prelude::*;
-use tokio::io::{write_all, read_until, read_exact};
+use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::prelude::*;
+use futures::sync::mpsc;
+use futures::future::{self, Either};
+use bytes::{BytesMut, Bytes, BufMut};
 
 
 use std::collections::HashMap;
@@ -29,6 +35,85 @@ impl State {
     }
 }
 
+struct Messages {
+    socket: TcpStream,
+    rd: BytesMut,
+    wr: BytesMut,
+}
+
+impl Stream for Messages {
+    type Item = BytesMut;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
+        let sock_closed = self.fill_read_buf()?.is_ready();
+
+        // Now, try finding lines
+        let pos = self.rd.windows(1).position(|bytes| bytes == b"#");
+
+        if let Some(pos) = pos {
+            // Remove the metadata from the read buffer
+            let mut metadata = self.rd.split_to(pos + 1);
+            println!("{:?}", self.rd);
+
+            // Drop the trailing #
+            line.split_off(pos);
+
+            // Return the line
+            return Ok(Async::Ready(Some(metadata)));
+        }
+
+        if sock_closed {
+            Ok(Async::Ready(None))
+        } else {
+            Ok(Async::NotReady)
+        }
+    }
+}
+
+impl Messages {
+    fn fill_read_buf(&mut self) -> Result<Async<()>, io::Error> {
+        loop {
+            self.rd.reserve(1024);
+            let n = try_ready!(self.socket.read_buf(&mut self.rd));
+            if n == 0 {
+                return Ok(Async::Ready(()));
+            }
+        }
+    }
+
+    fn buffer(&mut self, line: &[u8]) {
+        self.wr.put(line);
+    }
+
+    fn poll_flush(&mut self) -> Poll<(), io::Error> {
+        // As long as there is buffered data to write, try to write it.
+        while !self.wr.is_empty() {
+            // Try to write some bytes to the socket
+            let n = try_ready!(self.socket.poll_write(&self.wr));
+
+            // As long as the wr is not empty, a successful write should
+            // never write 0 bytes.
+            assert!(n > 0);
+
+            // This discards the first `n` bytes of the buffer.
+            let _ = self.wr.split_to(n);
+        }
+
+        Ok(Async::Ready(()))
+    }
+}
+
+impl Messages {
+    /// Create a new `Lines` codec backed by the socket
+    fn new(socket: TcpStream) -> Self {
+        Lines {
+            socket,
+            rd: BytesMut::new(),
+            wr: BytesMut::new(),
+        }
+    }
+}
 
 fn process_add(line: &String, cache: &mut HashMap<String, String>) {
     let key_length_str: String = line.chars().skip(1).take(5).collect();
@@ -46,6 +131,26 @@ fn process_get(line: &String, cache: &mut HashMap<String, String>) -> String {
     }
 }
 
+fn process(socket: TcpStream, state: Rc<State>) {
+    let messages = Messages::new(socket);
+    let connection = messages.into_future()
+        // `into_future` doesn't have the right error type, so map
+        // the error to make it work.
+        .map_err(|(e, _)| e)
+        // Process the first received line as the client's name.
+        .and_then(|(name, messages)| {
+            let name = match name {
+                Some(name) => name,
+                None => {
+                    // TODO: Handle a client that disconnects
+                    // early.
+                    unimplemented!();
+                }
+            };
+    });
+    tokio_current_thread::spawn(connection);
+}
+
 fn main() {
     let state_global = Rc::new( State{string_cache: UnsafeCell::new(HashMap::new()),
         peers: UnsafeCell::new(Vec::new())} );
@@ -54,8 +159,14 @@ fn main() {
     let listener = TcpListener::bind(&addr).expect("unable to bind TCP listener");
 
     let server = listener.incoming()
-    .map_err(|e| eprintln!("Accept connection error: {:?}", e))
     .for_each(move |sock| {
+        process(sock, state_global.clone());
+    }).map_err(|e| eprintln!("Accept connection error: {:?}", e));
+
+    tokio_current_thread::block_on_all(server);
+
+
+    /*
         let state = state_global.clone();
 
         let (reader, writer) = sock.split();
@@ -85,16 +196,16 @@ fn main() {
             return String::from("Success")
         })
         .map_err(|e| eprintln!("Processing error: {:?}", e))
-        .map(|_response| {
+        .fold(writer, |_writer, _response| {
             println!("executing wrtie all");
-            write_all(writer, _response.into_bytes()).map(|(w, _)| w)
+            write_all(_writer, _response.into_bytes()).map(|(w, _)| w)
         })
         .map_err(|e| eprintln!("Processing error: {:?}", e))
         .then(move |_| Ok( () ));
 
         tokio_current_thread::spawn(processing);
         Ok(())
-
+*/
         //.map_err(|e| eprintln!("Processing error: {:?}", e)).then(move |_| Ok(()));
 
 
@@ -140,7 +251,4 @@ fn main() {
         tokio_current_thread::spawn(msg);
         Ok(())
     */
-    });
-
-    tokio_current_thread::block_on_all(server);
 }

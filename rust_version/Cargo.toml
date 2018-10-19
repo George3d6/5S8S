@@ -7,6 +7,7 @@ authors = ["George Hosu <george@cerebralab.com>"]
 tokio = "0.1.11"
 futures = ""
 tokio-current-thread = "0.1.3"
+bytes = "*"
 
 [features]
 default = []
