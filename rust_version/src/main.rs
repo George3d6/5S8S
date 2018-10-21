@@ -57,7 +57,7 @@ impl Stream for Messages {
             println!("{:?}", self.rd);
 
             // Drop the trailing #
-            line.split_off(pos);
+            metadata.split_off(pos);
 
             // Return the line
             return Ok(Async::Ready(Some(metadata)));
@@ -107,7 +107,7 @@ impl Messages {
 impl Messages {
     /// Create a new `Lines` codec backed by the socket
     fn new(socket: TcpStream) -> Self {
-        Lines {
+        Messages {
             socket,
             rd: BytesMut::new(),
             wr: BytesMut::new(),
@@ -138,7 +138,7 @@ fn process(socket: TcpStream, state: Rc<State>) {
         // the error to make it work.
         .map_err(|(e, _)| e)
         // Process the first received line as the client's name.
-        .and_then(|(name, messages)| {
+        .map(|(name, messages)| {
             let name = match name {
                 Some(name) => name,
                 None => {
@@ -147,8 +147,8 @@ fn process(socket: TcpStream, state: Rc<State>) {
                     unimplemented!();
                 }
             };
-    });
-    tokio_current_thread::spawn(connection);
+    }).then(move |_| Ok( () ));
+    tokio_current_thread::spawn(connection)
 }
 
 fn main() {
@@ -159,9 +159,11 @@ fn main() {
     let listener = TcpListener::bind(&addr).expect("unable to bind TCP listener");
 
     let server = listener.incoming()
+    .map_err(|e| eprintln!("Accept connection error: {:?}", e))
     .for_each(move |sock| {
         process(sock, state_global.clone());
-    }).map_err(|e| eprintln!("Accept connection error: {:?}", e));
+        Ok(())
+    });
 
     tokio_current_thread::block_on_all(server);
 
