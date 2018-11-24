@@ -20,8 +20,9 @@ class Client:
             for conn in self.pool:
                 if conn[2] == False:
                     conn[2] = True
-                    conn[1].write('a{}{}{}\n'.format( str(len(key)).zfill(5), key, value ).encode('utf-8'))
+                    conn[1].write('a{}{}{}{}'.format( str(len(key)).zfill(8),  str(len(value)).zfill(8), key, value ).encode('utf-8'))
                     status = await conn[0].read(254)
+                    print(status)
                     conn[2] = False
                     return status
             await asyncio.sleep(0.01)
@@ -31,8 +32,7 @@ class Client:
             for conn in self.pool:
                 if conn[2] == False:
                     conn[2] = True
-                    conn[1].write('g{}\n'.format(key).encode('utf-8'))
-                    # !!?!?!?
+                    conn[1].write('g{}{}'.format(str(len(key)).zfill(8), key).encode('utf-8'))
                     value = await conn[0].read(255)
                     conn[2] = False
                     return value

@@ -5,7 +5,7 @@ from time import time
 
 
 loop = asyncio.get_event_loop()
-nr_itt = int(2 * 1000)
+nr_itt = int(0.2 * 1000)
 
 
 async def send_redis(nr_itt, loop):

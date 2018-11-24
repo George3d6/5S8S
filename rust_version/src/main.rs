@@ -22,45 +22,52 @@ use std::rc::Rc;
 
 
 pub struct State {
-    string_cache: UnsafeCell<HashMap<Vec<u8>, Vec<u8>>>,
+    string_cache: UnsafeCell<HashMap<BytesMut, BytesMut>>,
     peers: UnsafeCell<Vec<String>>,
 }
 
 impl State {
     fn get_peers(&self) -> &mut Vec<String> {
-        unsafe { return &mut *self.peers.get();}
+        unsafe { return &mut *self.peers.get(); }
     }
-    fn get_string_cache(&self) -> &mut HashMap<Vec<u8>, Vec<u8>> {
-        unsafe { return &mut *self.string_cache.get();}
+    fn get_bytes_cache(&self) -> &mut HashMap<BytesMut, BytesMut> {
+        unsafe { return &mut *self.string_cache.get(); }
     }
 }
 
 struct Messages {
     socket: TcpStream,
+    state: u8,
+
+    operation: BytesMut,
+
+    key_len: usize,
+    val_len: usize,
+
     rd: BytesMut,
     wr: BytesMut,
 }
 
 impl Stream for Messages {
-    type Item = BytesMut;
+    type Item = (BytesMut, BytesMut, BytesMut);
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
         let sock_closed = self.fill_read_buf()?.is_ready();
 
-        // Now, try finding lines
-        let pos = self.rd.windows(1).position(|bytes| bytes == b"#");
-
-        if let Some(pos) = pos {
-            // Remove the metadata from the read buffer
-            let mut metadata = self.rd.split_to(pos + 1);
-            println!("{:?}", self.rd);
-
-            // Drop the trailing #
-            metadata.split_off(pos);
-
-            // Return the line
-            return Ok(Async::Ready(Some(metadata)));
+        if self.state == 0 && self.rd.len() > 8 {
+            self.operation = self.rd.split_to(1);
+            if self.operation == "a" {
+                self.key_len = str::from_utf8(&self.rd.split_to(8)).unwrap().parse::<usize>().unwrap();
+                self.val_len = str::from_utf8(&self.rd.split_to(8)).unwrap().parse::<usize>().unwrap();
+            }
+            self.state = 1;
+        }
+        if self.state == 1 && self.rd.len() >= self.key_len + self.val_len {
+            let k = self.rd.split_to(self.key_len);
+            let v =  self.rd.split_to(self.val_len);
+            self.state = 0;
+            return Ok(Async::Ready(Some((self.operation.clone(),v,k))));
         }
 
         if sock_closed {
@@ -82,11 +89,12 @@ impl Messages {
         }
     }
 
-    fn buffer(&mut self, line: &[u8]) {
-        self.wr.put(line);
+    fn buffer(&mut self, msg: &[u8]) {
+        self.wr.put(msg);
     }
 
-    fn poll_flush(&mut self) -> Poll<(), io::Error> {
+    fn poll_flush(&mut self) -> Poll<String, io::Error> {
+        println!("Flushing write buffer !");
         // As long as there is buffered data to write, try to write it.
         while !self.wr.is_empty() {
             // Try to write some bytes to the socket
@@ -100,27 +108,26 @@ impl Messages {
             let _ = self.wr.split_to(n);
         }
 
-        Ok(Async::Ready(()))
+        Ok(Async::Ready(("sfsdgdsgdsgds".to_string())))
     }
 }
 
 impl Messages {
-    /// Create a new `Lines` codec backed by the socket
     fn new(socket: TcpStream) -> Self {
         Messages {
             socket,
+            state: 0,
+            operation: BytesMut::new(),
+            key_len: 0,
+            val_len: 0,
             rd: BytesMut::new(),
             wr: BytesMut::new(),
         }
     }
 }
 
-fn process_add(line: &String, cache: &mut HashMap<String, String>) {
-    let key_length_str: String = line.chars().skip(1).take(5).collect();
-    let key_length = key_length_str.parse::<usize>().unwrap();
-    let key: String = line.chars().skip(6).take(key_length).collect();
-    let val: String = line.chars().skip(6 + key_length).take(line.len()).collect();
-    cache.insert(key, val);
+fn process_add(k: BytesMut, v: BytesMut, cache: &mut HashMap<BytesMut, BytesMut>) {
+    cache.insert(k, v);
 }
 
 fn process_get(line: &String, cache: &mut HashMap<String, String>) -> String {
@@ -134,19 +141,24 @@ fn process_get(line: &String, cache: &mut HashMap<String, String>) -> String {
 fn process(socket: TcpStream, state: Rc<State>) {
     let messages = Messages::new(socket);
     let connection = messages.into_future()
-        // `into_future` doesn't have the right error type, so map
-        // the error to make it work.
         .map_err(|(e, _)| e)
-        // Process the first received line as the client's name.
-        .map(|(name, messages)| {
-            let name = match name {
-                Some(name) => name,
+        .map(move |(msg, mut messages)| {
+            let write_back = match msg {
+                Some(msg) => {
+                    if msg.0 == "a" {
+                        let sr = state.get_bytes_cache();
+                        process_add(msg.1, msg.2, sr);
+                    }
+                    "All is fine chief"
+                },
                 None => {
-                    // TODO: Handle a client that disconnects
-                    // early.
-                    unimplemented!();
+                    // @TODO handle disconect
+                    println!("Client has closed the connection");
+                    "Conn closed"
                 }
             };
+            messages.buffer(write_back.as_bytes());
+            messages.poll_flush()
     }).then(move |_| Ok( () ));
     tokio_current_thread::spawn(connection)
 }
@@ -173,7 +185,7 @@ fn main() {
 
         let (reader, writer) = sock.split();
 
-        // let metadata: Vec<u8> = Vec::new();
+        // let metadata: BytesMut = Vec::new();
         let metadata_future = read_until(BufReader::new(reader), '#' as u8, Vec::new());
         let processing = metadata_future.map(move |(_reader, metadata)| {
             let action = metadata[0];
