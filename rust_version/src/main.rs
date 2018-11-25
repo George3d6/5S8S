@@ -22,7 +22,7 @@ use std::rc::Rc;
 
 
 pub struct State {
-    string_cache: UnsafeCell<HashMap<BytesMut, BytesMut>>,
+    sv_cache: UnsafeCell<HashMap<BytesMut, BytesMut>>,
     peers: UnsafeCell<Vec<String>>,
 }
 
@@ -31,7 +31,7 @@ impl State {
         unsafe { return &mut *self.peers.get(); }
     }
     fn get_bytes_cache(&self) -> &mut HashMap<BytesMut, BytesMut> {
-        unsafe { return &mut *self.string_cache.get(); }
+        unsafe { return &mut *self.sv_cache.get(); }
     }
 }
 
@@ -57,12 +57,16 @@ impl Stream for Messages {
 
         if self.state == 0 && self.rd.len() > 8 {
             self.operation = self.rd.split_to(1);
-            if self.operation == "a" {
+            if self.operation == "a" || self.operation == "r" {
                 self.key_len = str::from_utf8(&self.rd.split_to(8)).unwrap().parse::<usize>().unwrap();
                 self.val_len = str::from_utf8(&self.rd.split_to(8)).unwrap().parse::<usize>().unwrap();
+            } else {
+                self.key_len = str::from_utf8(&self.rd.split_to(8)).unwrap().parse::<usize>().unwrap();
+                self.val_len = 0;
             }
             self.state = 1;
         }
+
         if self.state == 1 && self.rd.len() >= self.key_len + self.val_len {
             let k = self.rd.split_to(self.key_len);
             let v =  self.rd.split_to(self.val_len);
@@ -126,15 +130,15 @@ impl Messages {
     }
 }
 
-fn process_add(k: BytesMut, v: BytesMut, cache: &mut HashMap<BytesMut, BytesMut>) {
-    cache.insert(k, v);
+fn process_add(key: BytesMut, val: BytesMut, cache: &mut HashMap<BytesMut, BytesMut>) {
+    cache.insert(key, val);
 }
 
-fn process_get(line: &String, cache: &mut HashMap<String, String>) -> String {
-    let key: String = line.chars().skip(1).take(line.len()).collect();
+fn process_get(key: BytesMut, cache: &mut HashMap<BytesMut, BytesMut>) -> String {
     match cache.get(&key) {
-        Some(val) => return format!("s{}", val),
-        None => return String::from("f")
+        // @TODO using format here is just for debugging purposes
+        Some(val) => return format!("o{:08}{:?}", val.len(), val),
+        None => return String::from("e")
     }
 }
 
@@ -146,15 +150,20 @@ fn process(socket: TcpStream, state: Rc<State>) {
             let write_back = match msg {
                 Some(msg) => {
                     if msg.0 == "a" {
-                        let sr = state.get_bytes_cache();
-                        process_add(msg.1, msg.2, sr);
+                        process_add(msg.1, msg.2, state.get_bytes_cache());
+                        // @TODO: Implement replication on other instances
+                    } else if msg.0 == "r" {
+                        process_add(msg.1, msg.2, state.get_bytes_cache());
+                    } else if msg.0 == "g" {
+
+                    } else if msg.0 == "d" {
+
                     }
-                    "All is fine chief"
+                    "o"
                 },
                 None => {
                     // @TODO handle disconect
-                    println!("Client has closed the connection");
-                    "Conn closed"
+                    "e"
                 }
             };
             messages.buffer(write_back.as_bytes());
@@ -164,7 +173,7 @@ fn process(socket: TcpStream, state: Rc<State>) {
 }
 
 fn main() {
-    let state_global = Rc::new( State{string_cache: UnsafeCell::new(HashMap::new()),
+    let state_global = Rc::new( State{sv_cache: UnsafeCell::new(HashMap::new()),
         peers: UnsafeCell::new(Vec::new())} );
 
     let addr = "127.0.0.1:5282".parse().unwrap();
@@ -231,7 +240,7 @@ fn main() {
             let mut message = String::from("Error");
             // Add a key - value pair
             if (action == "a") {
-                process_add(&line, state.get_string_cache());
+                process_add(&line, state.get_sv_cache());
                 for addr_str in state.get_peers() {
                     let addr = addr_str.parse().unwrap();
                     let linez = line.clone();
@@ -252,7 +261,7 @@ fn main() {
             // Get a specific value for a key
             if (action == "g") {
 
-                message = process_get(&line, state.get_string_cache());
+                message = process_get(&line, state.get_sv_cache());
             }
             message
         });
